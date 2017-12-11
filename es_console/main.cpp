@@ -3,6 +3,7 @@
 #include <memory>
 #include <cstdio>
 #include <cassert>
+#include <functional>
 
 
 namespace es
@@ -43,13 +44,38 @@ int64_t map[18][32] = {
 
 }
 
+enum states
+{
+	stationary,
+	free_fall,
+
+};
+
+// -- TO DO
+using transition_map = std::unordered_map<states, std::function<void(es::sdl::sprite const&)>>;
+
+static auto& g_transiton_map()
+{
+	static transition_map g_map;
+	return g_map;
+}
+// ---
+
 int main(int argc, char *argv[])
 {
 	es::sdl::context sdl;
 	auto const a = es::sdl::create_bmp("assets/rect2985.bmp");
 	sdl.blit_surface_to_background(a.get());
 	es::sdl::g_asset_map()[1] = es::sdl::make_unique_asset(es::sdl::create_bmp("assets/visual-1.bmp"));
+	es::sdl::g_asset_map()[20] = es::sdl::make_unique_asset(es::sdl::create_bmp("assets/rect-player.bmp"));
 	sdl.print(es::map);
+
+	es::sdl::sprite spr{};
+	spr.visual = 20;
+	spr.physical = 1;
+	spr.size = es::sdl::vecf{ 1.0, 2.0 };
+	sdl.print(spr, es::map);
+	
 	sdl.update();
 	printf("JOBS DONE\n");
 	getchar();

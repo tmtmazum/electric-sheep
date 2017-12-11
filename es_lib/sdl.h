@@ -40,6 +40,23 @@ auto create_bmp(char const* filename)
 	return surface_t{ ES_EXPECT_SDL_PTR(SDL_ConvertSurfaceFormat(image.get(), SDL_PIXELFORMAT_RGBA32, 0)) };
 }
 
+struct vecf { float x; float y; };
+
+struct moveable_object
+{
+	vecf position;		// blocks per frame
+	vecf velocity;
+	vecf acceleration;
+	vecf size { 1.0, 1.0 };
+};
+
+class sprite : public moveable_object
+{
+public:
+	int32_t visual;
+	int32_t physical;
+};
+
 class context
 {
 public:
@@ -60,6 +77,12 @@ public:
 		SDL_GetWindowSize(m_window.get(), &x, &y);
 		return std::make_pair(x, y);
 	}
+
+	void blit_surface(SDL_Surface* s, SDL_Rect src, SDL_Rect dest) const
+	{
+		ES_EXPECT_SDL_ZERO(SDL_BlitScaled(s, &src, ES_EXPECT_SDL_PTR(get_window_surface()), &dest));
+	}
+
 
 	void blit_surface_to(SDL_Surface* s, SDL_Rect dest) const
 	{
@@ -91,14 +114,25 @@ public:
 			{
 				if (auto const visual = static_cast<uint32_t>(map[y][x] >> 32))
 				{
-					auto const it = g_asset_map().find(visual);
-					assert(it != g_asset_map().end());
-					auto surface = it->second->to_surface();
+					auto surface = get_visual_as_surface(visual);
 					assert(surface && "Specified surface does not exist");
 					blit_surface_to(surface, SDL_Rect{ x * unit.first, y * unit.second, unit.first, unit.second });
 				}
 			}
 		}
+	}
+
+	template <int NumH, int NumW>
+	void print(sprite const& s, int64_t const (&map) [NumH][NumW])
+	{
+		auto const ws = get_window_size();
+		
+		auto unit = std::make_pair(ws.first / NumW, ws.second / NumH);
+
+		auto surface = get_visual_as_surface(s.visual);
+		assert(surface && "Specified surface does not exist");
+		blit_surface_to(surface, SDL_Rect{ static_cast<int>(s.position.x * unit.first), static_cast<int>(s.position.y * unit.second), static_cast<int>(s.size.x * unit.first), 
+			static_cast<int>(s.size.y * unit.second) });
 	}
 
 	~context()
@@ -108,7 +142,7 @@ public:
 
 private:
 	window_t m_window;
-};
 
+};
 
 }}

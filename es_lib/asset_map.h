@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <string>
 #include <memory>
+#include <cassert>
 
 struct SDL_Surface;
 
@@ -40,6 +41,19 @@ static auto& g_asset_map()
 {
 	static asset_map g_underlying_asset_map;
 	return g_underlying_asset_map;
+}
+
+SDL_Surface* get_visual_as_surface(int32_t visual)
+{
+	auto const it = g_asset_map().find(visual);
+	if (it == g_asset_map().end()) 
+		return nullptr;
+
+	if (auto surface = it->second->to_surface())
+	{
+		return surface;
+	}
+	return nullptr;
 }
 
 }}
