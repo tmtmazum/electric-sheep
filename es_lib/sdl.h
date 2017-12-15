@@ -6,11 +6,11 @@
 #include "asset_map.h"
 #include <memory>
 #include <cassert>
+#include <unordered_map>
+#include <chrono>
 
 #define ES_EXPECT_SDL_ZERO(op) if(auto const reported_value = op) \
 	printf("Fail | " #op " -> %d, error='%s'\n", reported_value, SDL_GetError() ); \
-else  \
-	printf("Success | " #op "\n")
 
 #define ES_EXPECT_SDL_PTR(op) [&] { if(auto const ptr = op) return ptr; else { printf("Fail | " #op " -> %s\n", SDL_GetError()); assert(false && #op); return decltype(ptr){}; } }()\
 
@@ -29,9 +29,19 @@ struct destroy_window_t { void operator()(SDL_Window* ptr) { if(ptr) SDL_Destroy
 
 struct free_surface_t { void operator()(SDL_Surface* ptr) { if (ptr) SDL_FreeSurface(ptr); } };
 
+struct destroy_renderer_t { void operator()(SDL_Renderer* ptr) { if (ptr) SDL_DestroyRenderer(ptr); } };
+
+struct destroy_texture_t { void operator()(SDL_Texture* ptr) { if (ptr) SDL_DestroyTexture(ptr); } };
+
 using window_t = std::unique_ptr<SDL_Window, destroy_window_t>;
 
 using surface_t = std::unique_ptr<SDL_Surface, free_surface_t>;
+
+using renderer_t = std::unique_ptr<SDL_Renderer, destroy_renderer_t>;
+
+using texture_t = std::unique_ptr<SDL_Texture, destroy_texture_t>;
+
+using texture_map_t = std::unordered_map<std::uint32_t, texture_t>;
 
 auto create_bmp(char const* filename)
 {
@@ -41,6 +51,8 @@ auto create_bmp(char const* filename)
 }
 
 struct vecf { float x; float y; };
+
+struct veci { int x; int y; };
 
 struct moveable_object
 {
@@ -59,14 +71,20 @@ public:
 
 class context
 {
+	friend struct scoped_render;
+
 public:
 	context()
 	{
 		ES_EXPECT_SDL_ZERO(SDL_Init(SDL_INIT_EVERYTHING));
 
-		auto wptr = ES_EXPECT_SDL_PTR(SDL_CreateWindow("electric sheep", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-			es::default_screen_width, es::default_screen_height, SDL_WINDOW_SHOWN));
-		m_window = window_t{ wptr };
+		SDL_Window* win;
+		SDL_Renderer* rend;
+
+		ES_EXPECT_SDL_ZERO(SDL_CreateWindowAndRenderer(es::default_screen_width, es::default_screen_height, SDL_WINDOW_SHOWN
+			, &win, &rend));
+		m_window = window_t{ win };
+		m_renderer = renderer_t{ rend };
 	}
 
 	auto get_window_surface() const { return SDL_GetWindowSurface(m_window.get()); }
@@ -96,43 +114,22 @@ public:
 		blit_surface_to(s, SDL_Rect{ 0, 0, ws.first, ws.second });
 	}
 
-	void update()
+	void clear()
 	{
-		SDL_UpdateWindowSurface(m_window.get());
+		SDL_RenderClear(m_renderer.get());
 	}
 
-	template <int NumH, int NumW>
-	void print(int64_t const (&map) [NumH][NumW])
-	{
-		auto const ws = get_window_size();
-		
-		auto unit = std::make_pair(ws.first / NumW, ws.second / NumH);
+	void begin_render() { ES_EXPECT_SDL_ZERO(SDL_RenderClear(m_renderer.get())); }
 
-		for (int y = 0; y < NumH; y++)
-		{
-			for (int x = 0; x < NumW; x++)
-			{
-				if (auto const visual = static_cast<uint32_t>(map[y][x] >> 32))
-				{
-					auto surface = get_visual_as_surface(visual);
-					assert(surface && "Specified surface does not exist");
-					blit_surface_to(surface, SDL_Rect{ x * unit.first, y * unit.second, unit.first, unit.second });
-				}
-			}
-		}
+	void end_render() 
+	{ 
+		SDL_RenderPresent(m_renderer.get()); 
+		m_last_update = std::chrono::steady_clock::now();
 	}
 
-	template <int NumH, int NumW>
-	void print(sprite const& s, int64_t const (&map) [NumH][NumW])
+	void render_copy(SDL_Texture& t, SDL_Rect* src = nullptr, SDL_Rect* dest = nullptr)
 	{
-		auto const ws = get_window_size();
-		
-		auto unit = std::make_pair(ws.first / NumW, ws.second / NumH);
-
-		auto surface = get_visual_as_surface(s.visual);
-		assert(surface && "Specified surface does not exist");
-		blit_surface_to(surface, SDL_Rect{ static_cast<int>(s.position.x * unit.first), static_cast<int>(s.position.y * unit.second), static_cast<int>(s.size.x * unit.first), 
-			static_cast<int>(s.size.y * unit.second) });
+		ES_EXPECT_SDL_ZERO(SDL_RenderCopy(m_renderer.get(), &t, src, dest));
 	}
 
 	~context()
@@ -140,9 +137,28 @@ public:
 		SDL_Quit();
 	}
 
+	void add_texture(std::uint32_t id, surface_t const& surface)
+	{
+		texture_t t{ ES_EXPECT_SDL_PTR(SDL_CreateTextureFromSurface(m_renderer.get(), surface.get())) };
+		m_texture_map.emplace(id, std::move(t));
+	}
+
+	SDL_Texture& texture_at(std::uint32_t id) { return *m_texture_map.at(id); }
+
+	auto const& last_update() const noexcept { return m_last_update; }
+
+	auto& wait_buffer() noexcept { return m_wait_buffer; }
+
 private:
 	window_t m_window;
 
+	renderer_t m_renderer;
+
+	texture_map_t m_texture_map;
+
+	std::chrono::steady_clock::time_point m_last_update;
+
+	std::chrono::microseconds m_wait_buffer{ 1500 };
 };
 
 }}
